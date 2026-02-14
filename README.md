@@ -137,9 +137,41 @@ Client          ────────►      Reverse Proxy      ◄───
 
 ### Hardware/Network
 - Plex Media Server running on local network
-- Ubuntu/Debian server on local network (can be VM with 1GB RAM)
-- WireGuard VPN tunnel from local network to remote server
+- **Ubuntu/Debian server on local network** with WireGuard client configured
+  - Can be VM with 1GB RAM (very lightweight)
+  - **MUST be the same machine that has the WireGuard tunnel configured**
+  - This is typically NOT your Plex server itself
+- WireGuard VPN tunnel from local network to remote server (outbound connection)
 - Remote server (AWS Lightsail, VPS, etc.) with iperf3 running
+
+### Why the Script Must Run on the WireGuard Machine
+
+**Critical:** The script MUST run on the machine that has the WireGuard tunnel configured, not just any machine on your network.
+
+**Why?**
+- The script tests upload speed **through the tunnel** (e.g., to 10.100.0.1)
+- Only the machine with WireGuard configured can reach the tunnel IP
+- Other machines on your LAN can't access the WireGuard network
+
+**Example Setup:**
+```
+Home Network:
+  - Plex Server: 192.168.2.215 (no WireGuard)
+  - DNS VM: 192.168.2.222 (HAS WireGuard tunnel) ← Install script HERE
+  - Gaming PC: 192.168.2.100 (no WireGuard)
+  - Router: 192.168.2.1 (no WireGuard)
+
+WireGuard Tunnel Network:
+  - Local endpoint: 10.100.0.2 (DNS VM's tunnel IP)
+  - Remote endpoint: 10.100.0.1 (Lightsail tunnel IP)
+
+The script runs on 192.168.2.222 because only IT can ping 10.100.0.1
+```
+
+**Common Mistake:**
+- ❌ Installing on Plex server that doesn't have WireGuard
+- ❌ Installing on router (unless router runs WireGuard client)
+- ✅ Installing on dedicated VM/server that runs WireGuard client
 
 ### Software Dependencies
 - `iperf3` - Bandwidth testing
@@ -149,6 +181,48 @@ Client          ────────►      Reverse Proxy      ◄───
 - `grep` - Text parsing
 
 ## Installation
+
+### Prerequisites - WireGuard Tunnel Must Be Working
+
+**Before installing this script, you need:**
+
+1. **WireGuard installed and configured** on your local server/VM
+2. **Active tunnel** to your remote server (VPS/Lightsail)
+3. **Can ping the remote tunnel IP** from your local server
+
+**Verify your WireGuard setup:**
+
+```bash
+# Check WireGuard is running
+sudo wg show
+
+# You should see something like:
+# interface: wg0
+#   public key: ...
+#   private key: (hidden)
+#   listening port: 51820
+#
+# peer: ...
+#   endpoint: YOUR_VPS_IP:51820
+#   allowed ips: 10.100.0.1/32
+#   latest handshake: 30 seconds ago
+
+# Test connectivity through tunnel
+ping 10.100.0.1
+
+# Should get replies - if not, fix WireGuard first!
+```
+
+**If WireGuard isn't working:**
+- This script won't work - it needs to test through the tunnel
+- Set up WireGuard first (see WireGuard documentation)
+- Ensure your local server has the WireGuard **client** configured
+- Ensure your remote VPS has the WireGuard **server** configured
+
+**Typical WireGuard Tunnel IPs:**
+- Local machine (where script runs): `10.100.0.2` or similar
+- Remote VPS (Lightsail): `10.100.0.1` or similar
+- These IPs are **separate** from your LAN IPs (192.168.x.x)
 
 ### 1. Set Up Remote Server (AWS Lightsail, VPS, etc.)
 
@@ -349,22 +423,69 @@ Verify:
 
 ### iperf3 Test Fails
 
-Verify tunnel:
+**First, verify WireGuard tunnel:**
 ```bash
-# Check WireGuard is up
+# Check WireGuard interface exists
+ip link show wg0
+
+# Check WireGuard is configured
 sudo wg show
 
-# Test connectivity
+# Verify tunnel connectivity
 ping 10.100.0.1
 
-# Test iperf3 manually
-iperf3 -c 10.100.0.1 -t 5
+# If ping fails, WireGuard has a problem - fix that first!
 ```
 
-Verify iperf3 server is running on remote:
+**Common WireGuard issues:**
+- WireGuard service not running: `sudo systemctl status wg-quick@wg0`
+- Firewall blocking: Check UFW/iptables rules
+- Endpoint unreachable: Check remote VPS is accessible
+- Wrong allowed IPs: Check WireGuard config allows 10.100.0.1/32
+
+**Test iperf3 manually:**
 ```bash
-# On remote server
+# This should work if WireGuard is working
+iperf3 -c 10.100.0.1 -t 5
+
+# If this fails but ping works, check iperf3 server on remote
+```
+
+**Verify iperf3 server is running on remote:**
+```bash
+# On remote server (Lightsail)
 sudo systemctl status iperf3
+
+# Check it's listening
+sudo netstat -tulpn | grep 5201
+```
+
+**Critical:** If you can't run `iperf3 -c 10.100.0.1` successfully, this script won't work. The machine running the script MUST have WireGuard tunnel access.
+
+### Wrong Machine for Installation
+
+### Wrong Machine for Installation
+
+**Error:** `Cannot reach 10.100.0.1` or `ping: connect: Network is unreachable`
+
+**Cause:** You installed the script on a machine that doesn't have WireGuard configured.
+
+**Solution:**
+1. Find which machine has WireGuard: Run `sudo wg show` on each machine
+2. Install the script on THAT machine only
+3. The machine must have a working tunnel to the remote server
+
+**Example:**
+```bash
+# On Plex server (192.168.2.215)
+sudo wg show
+# Output: (nothing - no WireGuard here)
+
+# On DNS VM (192.168.2.222)  
+sudo wg show
+# Output: interface: wg0 ... (WireGuard IS here!)
+
+# Install script on 192.168.2.222, NOT on 192.168.2.215
 ```
 
 ### Quality Not Changing
@@ -480,6 +601,21 @@ Tuesday 11:00 PM - Upload: 22 Mbps  →  Back to 12 Mbps (1080p High)
 
 ## FAQ
 
+**Q: Can I run this on my Plex server directly?**  
+A: Only if your Plex server ALSO has the WireGuard tunnel configured. In most setups, WireGuard runs on a separate VM/server, so install there.
+
+**Q: Do all my machines need WireGuard?**  
+A: No, only the machine running this script needs WireGuard. Your Plex server doesn't need it - the script just calls the Plex API over your LAN.
+
+**Q: What if I have WireGuard on my router?**  
+A: If your router runs WireGuard client, you could potentially install this on the router (if it supports bash/cron). Otherwise, use a dedicated VM.
+
+**Q: Can I use OpenVPN instead of WireGuard?**  
+A: Yes! The script just needs to test upload through whatever tunnel you have. Change `LIGHTSAIL_IP` to your OpenVPN tunnel endpoint IP.
+
+**Q: Why not just increase Plex's upload limit setting?**  
+A: The "Internet upload speed" setting is different - it's used for local/remote detection. This script adjusts the "Limit remote stream bitrate" setting which actually controls quality.
+
 **Q: Will this work with fiber ISP?**  
 A: Yes, but it's most useful for cable/DSL with variable upload speeds.
 
@@ -512,10 +648,13 @@ Created for managing Plex quality on cable ISP with variable upload speeds throu
 Created by Dan to solve the challenge of streaming Plex through an nginx reverse proxy on AWS Lightsail while dealing with cable ISP upload congestion.
 
 **My Setup:**
-- Plex Server on home network (Sidney, Ohio)
+- Plex Server on home network (Sidney, Ohio) - 192.168.2.215
+- Dedicated Ubuntu VM (1GB RAM) running WireGuard client and this script - 192.168.2.222
 - Spectrum cable ISP (1 Gbps down / 30 Mbps up - but variable)
-- AWS Lightsail VPS running nginx reverse proxy
-- WireGuard VPN tunnel (outbound from home to avoid ISP interference)
+- AWS Lightsail VPS running nginx reverse proxy + WireGuard server
+- WireGuard VPN tunnel (outbound from home VM to Lightsail)
+  - Local tunnel IP: 10.100.0.2
+  - Remote tunnel IP: 10.100.0.1
 - Upload varies 10-30 Mbps based on neighborhood congestion
 
 **Why I Built This:**
@@ -523,6 +662,9 @@ Created by Dan to solve the challenge of streaming Plex through an nginx reverse
 - Safe settings wasted bandwidth during off-peak hours
 - Needed automatic adaptation to cable node congestion
 - Wanted to maximize quality without manual intervention
+
+**Architecture Note:**
+The script runs on my DNS VM (192.168.2.222) because that's where I have WireGuard configured. The script tests upload speed by running iperf3 to the Lightsail tunnel IP (10.100.0.1), then adjusts the quality setting on my Plex server (192.168.2.215) via the Plex API.
 
 ## Acknowledgments
 
