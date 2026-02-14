@@ -73,11 +73,44 @@ get_sessions() {
     
     log_msg "Active streams: $count" >&2
     
-    # Calculate remote bandwidth (simplified - assumes average 8 Mbps per remote stream)
-    local remote_count=$(echo "$response" | grep -c 'local="0"')
-    local remote_bw=$(awk "BEGIN {printf \"%.2f\", $remote_count * 8}")
+    # Calculate remote bandwidth using Session bandwidth (most accurate)
+    local remote_count=0
+    local remote_bw=0
     
-    log_msg "Remote streams: $remote_count (~$remote_bw Mbps estimated)" >&2
+    # Check if player is remote (local="0" or local not present)
+    local is_remote=$(echo "$response" | grep -oP 'Player[^>]*local="\K[^"]+' | head -1)
+    
+    if [[ "$is_remote" == "1" ]]; then
+        log_msg "  Session: Local (skipped)" >&2
+        echo "$count 0.00"
+        return
+    fi
+    
+    # This is a remote session - get actual bandwidth being used
+    # The Session element has bandwidth in kbps
+    local session_bw=$(echo "$response" | grep -oP 'Session[^>]*bandwidth="\K[^"]+' | head -1)
+    
+    if [[ -n "$session_bw" ]] && [[ "$session_bw" -gt 0 ]]; then
+        # Convert kbps to Mbps
+        remote_bw=$(awk "BEGIN {printf \"%.2f\", $session_bw / 1000}")
+        remote_count=1
+        log_msg "  Remote session: $remote_bw Mbps (actual bandwidth)" >&2
+    else
+        # Fallback: try Media bitrate
+        local media_bw=$(echo "$response" | grep -oP 'Media[^>]*bitrate="\K[^"]+' | head -1)
+        if [[ -n "$media_bw" ]] && [[ "$media_bw" -gt 0 ]]; then
+            remote_bw=$(awk "BEGIN {printf \"%.2f\", $media_bw / 1000}")
+            remote_count=1
+            log_msg "  Remote session: $remote_bw Mbps (media bitrate)" >&2
+        else
+            # Last resort: estimate
+            remote_bw="3.00"
+            remote_count=1
+            log_msg "  Remote session: 3.00 Mbps (estimated)" >&2
+        fi
+    fi
+    
+    log_msg "Total remote: $remote_count stream(s), $remote_bw Mbps" >&2
     echo "$count $remote_bw"
 }
 
