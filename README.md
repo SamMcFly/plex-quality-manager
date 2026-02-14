@@ -157,12 +157,12 @@ Client          ────────►      Reverse Proxy      ◄───
 ```
 Home Network:
   - Plex Server: 192.168.2.215 (no WireGuard)
-  - DNS VM: 192.168.2.222 (HAS WireGuard tunnel) ← Install script HERE
+  - WireGuard VM: 192.168.2.222 (HAS WireGuard tunnel) ← Install script HERE
   - Gaming PC: 192.168.2.100 (no WireGuard)
   - Router: 192.168.2.1 (no WireGuard)
 
 WireGuard Tunnel Network:
-  - Local endpoint: 10.100.0.2 (DNS VM's tunnel IP)
+  - Local endpoint: 10.100.0.2 (WireGuard VM's tunnel IP)
   - Remote endpoint: 10.100.0.1 (Lightsail tunnel IP)
 
 The script runs on 192.168.2.222 because only IT can ping 10.100.0.1
@@ -481,7 +481,7 @@ sudo netstat -tulpn | grep 5201
 sudo wg show
 # Output: (nothing - no WireGuard here)
 
-# On DNS VM (192.168.2.222)  
+# On WireGuard VM (192.168.2.222)  
 sudo wg show
 # Output: interface: wg0 ... (WireGuard IS here!)
 
@@ -581,7 +581,7 @@ Tuesday 11:00 PM - Upload: 22 Mbps  →  Back to 12 Mbps (1080p High)
 
 ## Performance Impact
 
-### DNS Server (Ubuntu VM)
+### WireGuard VM (Ubuntu VM running the script)
 - **RAM:** ~5-10MB during test
 - **CPU:** ~10 seconds every 15 minutes
 - **Network:** 10-second upload test = ~25-35MB per test
@@ -650,6 +650,7 @@ Created by Dan to solve the challenge of streaming Plex through an nginx reverse
 **My Setup:**
 - Plex Server on home network (Sidney, Ohio) - 192.168.2.215
 - Dedicated Ubuntu VM (1GB RAM) running WireGuard client and this script - 192.168.2.222
+  - *This VM also happens to run my DNS server (Technitium), but that's unrelated to this script*
 - Spectrum cable ISP (1 Gbps down / 30 Mbps up - but variable)
 - AWS Lightsail VPS running nginx reverse proxy + WireGuard server
 - WireGuard VPN tunnel (outbound from home VM to Lightsail)
@@ -664,7 +665,7 @@ Created by Dan to solve the challenge of streaming Plex through an nginx reverse
 - Wanted to maximize quality without manual intervention
 
 **Architecture Note:**
-The script runs on my DNS VM (192.168.2.222) because that's where I have WireGuard configured. The script tests upload speed by running iperf3 to the Lightsail tunnel IP (10.100.0.1), then adjusts the quality setting on my Plex server (192.168.2.215) via the Plex API.
+The script runs on my WireGuard VM (192.168.2.222) because that's where I have WireGuard configured. The script tests upload speed by running iperf3 to the Lightsail tunnel IP (10.100.0.1), then adjusts the quality setting on my Plex server (192.168.2.215) via the Plex API.
 
 ## Acknowledgments
 
