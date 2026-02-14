@@ -1,0 +1,548 @@
+# Plex Quality Manager
+
+Automatically adjusts Plex remote streaming quality based on real-time upload bandwidth availability. Perfect for cable ISP connections with variable upload speeds.
+
+## Background
+
+This project was created to solve a specific problem: **streaming Plex remotely through an nginx reverse proxy on a VPS while dealing with variable cable ISP upload speeds**.
+
+### The Problem
+
+Many home users run Plex behind an nginx reverse proxy on a VPS/cloud server (AWS Lightsail, DigitalOcean, etc.) to:
+- Avoid ISP blocking of common media server ports
+- Get a clean external URL (plex.yourdomain.com instead of home-ip:32400)
+- Bypass carrier-grade NAT or dynamic IP issues
+- Use SSL certificates easily
+
+However, this setup creates a unique challenge: **your Plex streams are limited by your home upload speed, which varies significantly on cable ISP connections due to neighborhood congestion**.
+
+### The Specific Scenario This Solves
+
+**Traditional Plex Setup:**
+```
+Remote User → Internet → Home Plex Server (static quality setting)
+```
+Problem: Easy to set quality, but limited by ISP port restrictions.
+
+**Plex Behind VPS Setup:**
+```
+Remote User → Internet → VPS (nginx) → VPN Tunnel → Home Plex Server
+```
+Problem: Quality is limited by home upload AND it varies by time of day!
+
+**With Cable ISP:**
+- **3 AM:** 28-30 Mbps upload available (node empty)
+- **8 PM:** 12-15 Mbps upload available (neighborhood congestion)
+- **Static quality settings fail:** Set too high = buffering at peak. Set too low = wasted bandwidth off-peak.
+
+### The Solution
+
+This script continuously monitors your **actual usable upload bandwidth through the VPN tunnel** and dynamically adjusts Plex's quality limit to match current network conditions.
+
+**Result:** Maximum quality during off-peak hours, automatic reduction during congestion to prevent buffering.
+
+## Who Is This For?
+
+This solution is ideal if you have:
+
+✅ **Plex Media Server** running on your home network  
+✅ **VPS/Cloud server** (AWS Lightsail, DigitalOcean, etc.) running nginx as reverse proxy  
+✅ **VPN tunnel** (WireGuard, OpenVPN, etc.) from home to VPS  
+✅ **Cable or DSL ISP** with variable/congested upload speeds  
+✅ **Linux server or VM** on home network (can be small - 1GB RAM is fine)
+
+### Example Setups That Benefit
+
+**Setup 1: ISP Port Restrictions**
+- Cable ISP blocks common ports
+- Run WireGuard from home to AWS Lightsail
+- nginx on Lightsail proxies to home Plex
+- Upload varies 10-30 Mbps depending on time of day
+
+**Setup 2: Carrier-Grade NAT**
+- ISP uses CGNAT, can't port forward
+- VPS with public IP runs nginx reverse proxy
+- OpenVPN tunnel from home to VPS
+- DSL upload varies 5-15 Mbps
+
+**Setup 3: Clean External URL**
+- Want plex.mydomain.com instead of IP:port
+- nginx on cloud server handles SSL and domain
+- WireGuard tunnel for security
+- Cable upload congestion during peak hours
+
+### Not For You If...
+
+❌ You have **fiber with symmetric gigabit** (your upload is always stable)  
+❌ You **don't use a VPN tunnel** to a remote proxy  
+❌ You have **dedicated server hosting** (not home internet)  
+❌ Your ISP has **stable upload** (business-class, some fiber)
+
+## Overview
+
+This script monitors your upload speed through a WireGuard VPN tunnel and dynamically adjusts Plex's "Limit remote stream bitrate" setting to prevent buffering while maximizing quality.
+
+**Key Features:**
+- ⚡ **Real-time bandwidth monitoring** - Tests upload speed every 15 minutes
+- 🎯 **Smart quality adjustment** - Automatically sets optimal bitrate based on available bandwidth
+- 📊 **Session-aware** - Accounts for current streaming usage when calculating available bandwidth
+- 🕐 **Time-based optimization** - More conservative during peak hours (5-11 PM)
+- 🔍 **Congestion detection** - Applies penalty when high packet retransmissions detected
+- 📝 **Detailed logging** - Track all quality changes and bandwidth tests
+- 💤 **Idle optimization** - Skips tests when no one is streaming (saves bandwidth)
+
+## Use Case
+
+This is designed for users who:
+- Stream Plex remotely through a VPN tunnel (WireGuard, etc.)
+- Have cable ISP with variable upload speeds
+- Experience buffering during peak hours due to neighborhood congestion
+- Want automatic quality adjustment without manual intervention
+
+## Architecture
+
+This solution sits between your home network and remote users, monitoring the VPN tunnel bandwidth that's actually available for Plex streaming.
+
+```
+Internet Users                  Cloud VPS (Public IP)              Home Network (Behind ISP)
+─────────────                  ───────────────────────            ─────────────────────────
+
+Remote Plex                         nginx                         
+Client          ────────►      Reverse Proxy      ◄────VPN────►  Plex Server
+(anywhere)                     (SSL/Domain)         Tunnel       192.168.x.x
+                                                   WireGuard/     
+                                                   OpenVPN        Quality Manager
+                                   iperf3                         (monitors tunnel)
+                                   server         ◄────test──    192.168.x.x
+                                  (bandwidth                      
+                                   testing)                       Tests upload every
+                                                                  15 min, adjusts
+                                                                  Plex quality
+```
+
+**Traffic Flow:**
+1. Remote user connects to `plex.yourdomain.com` (your VPS)
+2. nginx reverse proxy forwards to Plex via VPN tunnel
+3. Plex streams through tunnel (limited by home upload)
+4. Quality Manager monitors tunnel bandwidth
+5. Adjusts Plex quality based on current upload capacity
+
+**Why Monitor the Tunnel?**
+- Your home upload to the VPS is the bottleneck
+- Cable ISP upload varies based on neighborhood usage
+- VPN adds ~5-10% overhead
+- Real tunnel speed ≠ advertised ISP speed
+
+## Requirements
+
+### Hardware/Network
+- Plex Media Server running on local network
+- Ubuntu/Debian server on local network (can be VM with 1GB RAM)
+- WireGuard VPN tunnel from local network to remote server
+- Remote server (AWS Lightsail, VPS, etc.) with iperf3 running
+
+### Software Dependencies
+- `iperf3` - Bandwidth testing
+- `jq` - JSON parsing
+- `awk` - Math calculations
+- `curl` - Plex API calls
+- `grep` - Text parsing
+
+## Installation
+
+### 1. Set Up Remote Server (AWS Lightsail, VPS, etc.)
+
+Install and configure iperf3 as a service:
+
+```bash
+# Install iperf3
+sudo apt update
+sudo apt install -y iperf3
+
+# Copy the systemd service file
+sudo cp iperf3.service /etc/systemd/system/
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable iperf3
+sudo systemctl start iperf3
+
+# Verify it's running
+sudo systemctl status iperf3
+```
+
+### 2. Set Up Local Server (Ubuntu/Debian)
+
+Install dependencies:
+
+```bash
+sudo apt update
+sudo apt install -y iperf3 jq bc curl
+```
+
+Install the script:
+
+```bash
+# Copy script to system location
+sudo cp plex-quality-manager.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/plex-quality-manager.sh
+
+# Create log file
+sudo touch /var/log/plex-quality-manager.log
+sudo chown $USER:$USER /var/log/plex-quality-manager.log
+```
+
+### 3. Configure
+
+Edit the script configuration:
+
+```bash
+sudo nano /usr/local/bin/plex-quality-manager.sh
+```
+
+Update these values at the top:
+```bash
+PLEX_SERVER="http://192.168.x.x:32400"  # Your Plex server IP
+PLEX_TOKEN="your_token_here"            # Your Plex authentication token
+LIGHTSAIL_IP="10.100.0.1"               # Your remote server WireGuard IP
+```
+
+**Getting Your Plex Token:**
+1. Open Plex Web (http://your-plex-ip:32400/web)
+2. Play any media item
+3. Click "..." → "Get Info" → "View XML"
+4. Look at the URL for `X-Plex-Token=...`
+5. Copy the token value
+
+### 4. Test
+
+Run manually to verify it works:
+
+```bash
+/usr/local/bin/plex-quality-manager.sh
+```
+
+You should see output showing:
+- Current Plex quality setting
+- Upload speed test results
+- Recommended quality
+- Success/failure of quality change
+
+### 5. Set Up Cron Job
+
+Run automatically every 15 minutes:
+
+```bash
+crontab -e
+```
+
+Add this line:
+```
+*/15 * * * * /usr/local/bin/plex-quality-manager.sh
+```
+
+Save and exit.
+
+## Configuration Options
+
+Edit these variables in the script:
+
+```bash
+# Skip bandwidth test if no one is streaming (saves bandwidth)
+SKIP_TEST_WHEN_IDLE=true
+
+# How long to run each upload test (seconds)
+TEST_DURATION=10
+
+# Log file location
+LOG_FILE="/var/log/plex-quality-manager.log"
+```
+
+## How It Works
+
+### Quality Selection Algorithm
+
+The script calculates available bandwidth using this logic:
+
+1. **Test Upload Speed** - 10-second iperf3 test through WireGuard tunnel
+2. **Apply Safety Margin** - Uses 50% during peak hours (5-11 PM), 65% off-peak
+3. **Congestion Penalty** - Reduces by 20% if high retransmissions detected
+4. **Subtract Current Usage** - Accounts for active remote streams
+5. **Select Quality** - Chooses highest bitrate that fits available bandwidth
+
+### Quality Tiers
+
+| Available Bandwidth | Plex Setting |
+|---------------------|--------------|
+| 25+ Mbps | 20 Mbps 1080p |
+| 18-25 Mbps | 12 Mbps 1080p |
+| 13-18 Mbps | 10 Mbps 1080p |
+| 10-13 Mbps | 8 Mbps 1080p |
+| 7-10 Mbps | 4 Mbps 720p |
+| <7 Mbps | 3 Mbps 720p |
+
+### Example Calculation
+
+**Scenario: Peak hours, cable congestion**
+- Raw upload test: 16 Mbps
+- Peak hour safety (50%): 8 Mbps usable
+- High retransmits (80): Apply 20% penalty = 6.4 Mbps
+- Current remote stream: 0 Mbps
+- **Result: Sets quality to 4 Mbps 720p**
+
+**Scenario: Off-peak, good connection**
+- Raw upload test: 28 Mbps
+- Off-peak safety (65%): 18.2 Mbps usable
+- Low retransmits: No penalty
+- Current remote stream: 0 Mbps
+- **Result: Sets quality to 12 Mbps 1080p**
+
+## Monitoring
+
+### View Recent Activity
+
+```bash
+# Last 50 log entries
+tail -50 /var/log/plex-quality-manager.log
+
+# Live monitoring
+tail -f /var/log/plex-quality-manager.log
+```
+
+### View Quality Changes
+
+```bash
+grep "Recommended" /var/log/plex-quality-manager.log | tail -20
+```
+
+### View Upload Speed History
+
+```bash
+grep "Upload:" /var/log/plex-quality-manager.log | tail -20
+```
+
+## Troubleshooting
+
+### Script Not Running
+
+Check cron:
+```bash
+# View cron logs
+grep CRON /var/log/syslog | tail -20
+
+# Verify cron service
+sudo systemctl status cron
+```
+
+### Cannot Connect to Plex
+
+Test manually:
+```bash
+curl -s "http://your-plex-ip:32400/?X-Plex-Token=YOUR_TOKEN"
+```
+
+Verify:
+- Plex server is running
+- IP address is correct
+- Token is valid
+- No firewall blocking
+
+### iperf3 Test Fails
+
+Verify tunnel:
+```bash
+# Check WireGuard is up
+sudo wg show
+
+# Test connectivity
+ping 10.100.0.1
+
+# Test iperf3 manually
+iperf3 -c 10.100.0.1 -t 5
+```
+
+Verify iperf3 server is running on remote:
+```bash
+# On remote server
+sudo systemctl status iperf3
+```
+
+### Quality Not Changing
+
+Enable debug mode:
+```bash
+# Run script with verbose output
+bash -x /usr/local/bin/plex-quality-manager.sh
+```
+
+Check Plex settings manually:
+```bash
+curl -s "http://your-plex-ip:32400/:/prefs?X-Plex-Token=YOUR_TOKEN" | grep WanPerStreamMaxUploadRate
+```
+
+## Advanced Usage
+
+### Adjust Safety Margins
+
+Edit `get_safety_margin()` function to change peak/off-peak percentages:
+
+```bash
+get_safety_margin() {
+    local hour=$(date +%H)
+    if [[ $hour -ge 17 && $hour -le 23 ]]; then
+        echo "50"  # Peak hours - change this value
+    else
+        echo "65"  # Off-peak - change this value
+    fi
+}
+```
+
+### Change Quality Thresholds
+
+Edit `get_quality_preset()` function to adjust bandwidth thresholds:
+
+```bash
+if awk "BEGIN {exit !($bw >= 25)}"; then
+    kbps=20000  # 20 Mbps - adjust threshold or bitrate
+elif awk "BEGIN {exit !($bw >= 18)}"; then
+    kbps=12000  # 12 Mbps - adjust threshold or bitrate
+# ... etc
+```
+
+### Run More Frequently During Peak
+
+Edit crontab to run every 10 minutes during peak hours:
+
+```bash
+# Every 10 minutes from 5 PM to 11 PM
+*/10 17-23 * * * /usr/local/bin/plex-quality-manager.sh
+
+# Every 30 minutes all other times
+*/30 0-16,23 * * * /usr/local/bin/plex-quality-manager.sh
+```
+
+## Real-World Example
+
+### Before (Static Quality Setting)
+
+**Plex set to 12 Mbps (1080p High):**
+
+```
+Monday 3:00 AM  - Upload: 28 Mbps  →  12 Mbps used, 16 Mbps wasted
+Monday 8:00 PM  - Upload: 13 Mbps  →  Buffering! (12 Mbps too high)
+Monday 9:30 PM  - Upload: 11 Mbps  →  Severe buffering, stream drops
+```
+
+**Plex set to 8 Mbps (1080p Medium) - Safe Setting:**
+
+```
+Monday 3:00 AM  - Upload: 28 Mbps  →  8 Mbps used, 20 Mbps wasted!
+Monday 8:00 PM  - Upload: 13 Mbps  →  Works, but could stream higher
+Sunday 2:00 PM  - Upload: 25 Mbps  →  8 Mbps used, 17 Mbps wasted!
+```
+
+### After (Dynamic Quality Management)
+
+**Plex Quality Manager automatically adjusts:**
+
+```
+Monday 3:00 AM  - Upload: 28 Mbps  →  Set to 12 Mbps (1080p High)
+Monday 8:00 PM  - Upload: 13 Mbps  →  Set to 8 Mbps (1080p Medium)
+Monday 9:30 PM  - Upload: 11 Mbps  →  Set to 4 Mbps (720p) - No buffering!
+Tuesday 11:00 PM - Upload: 22 Mbps  →  Back to 12 Mbps (1080p High)
+```
+
+**Result:**
+- ✅ No more buffering during peak hours
+- ✅ Maximum quality during off-peak hours
+- ✅ Automatic adaptation to network conditions
+- ✅ No manual intervention needed
+
+## Performance Impact
+
+### DNS Server (Ubuntu VM)
+- **RAM:** ~5-10MB during test
+- **CPU:** ~10 seconds every 15 minutes
+- **Network:** 10-second upload test = ~25-35MB per test
+- **Disk:** Log file grows ~5KB per run
+
+### Remote Server
+- **RAM:** ~5MB for iperf3 server
+- **CPU:** Negligible
+- **Network:** Receives test traffic only
+
+## Security Notes
+
+- Plex token is stored in plaintext in the script
+- Use appropriate file permissions: `chmod 700 /usr/local/bin/plex-quality-manager.sh`
+- Consider using environment variables for sensitive data
+- WireGuard tunnel encrypts all traffic
+
+## FAQ
+
+**Q: Will this work with fiber ISP?**  
+A: Yes, but it's most useful for cable/DSL with variable upload speeds.
+
+**Q: Can I use this without WireGuard?**  
+A: Yes, but you'll need to modify the upload test to use your actual WAN connection instead of the tunnel.
+
+**Q: Does this affect local streaming?**  
+A: No, this only affects the "Limit remote stream bitrate" setting for non-local connections.
+
+**Q: What if I have multiple remote users streaming?**  
+A: The script estimates bandwidth per remote stream (8 Mbps average) and accounts for it when setting quality for new streams.
+
+**Q: Can I run this on a Raspberry Pi?**  
+A: Yes! It's very lightweight and works great on Pi.
+
+## License
+
+MIT License - See LICENSE file for details
+
+## Contributing
+
+Issues and pull requests welcome!
+
+## Author
+
+Created for managing Plex quality on cable ISP with variable upload speeds through WireGuard VPN tunnel.
+
+## Author
+
+Created by Dan to solve the challenge of streaming Plex through an nginx reverse proxy on AWS Lightsail while dealing with cable ISP upload congestion.
+
+**My Setup:**
+- Plex Server on home network (Sidney, Ohio)
+- Spectrum cable ISP (1 Gbps down / 30 Mbps up - but variable)
+- AWS Lightsail VPS running nginx reverse proxy
+- WireGuard VPN tunnel (outbound from home to avoid ISP interference)
+- Upload varies 10-30 Mbps based on neighborhood congestion
+
+**Why I Built This:**
+- Static quality settings caused buffering during prime time
+- Safe settings wasted bandwidth during off-peak hours
+- Needed automatic adaptation to cable node congestion
+- Wanted to maximize quality without manual intervention
+
+## Acknowledgments
+
+- Inspired by the need to work around ISP throttling and port restrictions
+- Built for the homelab community running Plex on residential connections
+- Special thanks to the Plex and WireGuard communities for excellent tools
+
+## Similar Projects
+
+If this doesn't fit your use case, check out:
+- **Tautulli** - Plex monitoring and notification tool
+- **Plex Meta Manager** - Advanced Plex library management
+- **Organizr** - Unified interface for media services
+
+## Changelog
+
+### v1.0.0 (2026-02-14)
+- Initial release
+- Automatic quality adjustment based on upload speed
+- Peak/off-peak time awareness
+- Session-aware bandwidth calculation
+- Congestion detection via retransmissions
+- Idle optimization to skip tests when no streams active

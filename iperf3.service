@@ -1,0 +1,12 @@
+[Unit]
+Description=iperf3 server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/iperf3 -s
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Local configuration (if users customize)
+config.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
