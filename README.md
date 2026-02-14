@@ -1,6 +1,44 @@
 # Plex Quality Manager
 
-Automatically adjusts Plex remote streaming quality based on real-time upload bandwidth availability. Perfect for cable ISP connections with variable upload speeds.
+Automatically adjusts Plex remote streaming quality based on real-time upload bandwidth availability.
+
+## 🚀 Quick Start - Choose Your Version
+
+This tool comes in **two versions** depending on your setup:
+
+### 📊 Version Comparison
+
+| | **Bash Version** (Recommended) | **Python Version** (Simple) |
+|---|---|---|
+| **Best For** | Plex behind VPN tunnel + reverse proxy | Direct Plex setup, no VPN |
+| **Speed Test** | iperf3 through tunnel (10 sec) | speedtest-cli (30-60 sec) |
+| **Accuracy** | Excellent (actual tunnel bandwidth) | Good (if ISP doesn't throttle) |
+| **Setup** | Moderate (needs VPS + WireGuard) | Simple (one Python script) |
+| **Requirements** | VPS, WireGuard, Ubuntu VM | Python 3, Plex server |
+| **Test Frequency** | Every 15 minutes | Every 30 minutes |
+| **Platform** | Linux only | Cross-platform |
+
+### 🎯 Which Version Should I Use?
+
+**→ Use BASH version if:**
+- ✅ You have Plex behind nginx reverse proxy on a VPS
+- ✅ You use WireGuard/OpenVPN tunnel from home to VPS
+- ✅ You have AWS Lightsail, DigitalOcean, or similar VPS
+- ✅ You want accurate tunnel bandwidth measurement
+- ✅ You have cable/DSL with variable upload
+
+**→ Use PYTHON version if:**
+- ✅ Your Plex server is directly exposed to internet (no VPN)
+- ✅ You want simple setup without VPS requirements
+- ✅ You can run Python on your Plex server
+- ✅ Your ISP doesn't throttle speedtest.net
+- ✅ You're okay with slower/less frequent testing
+
+**Installation Links:**
+- **Bash Version:** [Continue reading below](#background) ← The main version documented here
+- **Python Version:** See [PYTHON_VERSION.md](PYTHON_VERSION.md) for installation
+
+---
 
 ## Background
 
@@ -77,6 +115,21 @@ This solution is ideal if you have:
 ❌ You **don't use a VPN tunnel** to a remote proxy  
 ❌ You have **dedicated server hosting** (not home internet)  
 ❌ Your ISP has **stable upload** (business-class, some fiber)
+
+## 📚 Documentation
+
+- **Main README (you are here):** Bash version for VPN tunnel setups
+- **[Python Version Guide](PYTHON_VERSION.md):** Simple version for direct Plex setups
+- **[Remote Server Setup](REMOTE_SETUP.md):** Setting up iperf3 on VPS (bash version only)
+- **[GitHub Wiki](../../wiki):** Detailed guides, troubleshooting, and examples
+
+---
+
+The remainder of this README covers the **Bash version** (VPN tunnel setup).
+
+For the Python version, see [PYTHON_VERSION.md](PYTHON_VERSION.md).
+
+---
 
 ## Overview
 
